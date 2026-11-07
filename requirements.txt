@@ -1,0 +1,7 @@
+# 明日方舟自动公招脚本依赖 (Python 3.10+，已在 3.13 验证)
+rapidocr>=3.0.0          # OCR（onnxruntime 后端，离线中文识别）
+onnxruntime>=1.20.0      # rapidocr 推理引擎
+opencv-python-headless>=4.8.0  # 截图解码/图像处理（rapidocr 会自带，这里显式声明）
+numpy>=1.24.0
+PyYAML>=6.0
+requests>=2.31.0

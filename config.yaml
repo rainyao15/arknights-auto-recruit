@@ -1,0 +1,133 @@
+# ============================================================
+# 明日方舟 自动公招脚本 配置
+# ============================================================
+
+adb:
+  # adb 可执行文件路径；留空则自动找 PATH → 模拟器自带 adb
+  # 例: "C:/Program Files/Netease/MuMu Player 12/shell/adb.exe"
+  adb_path: "D:/Program Files/Netease/MuMu/nx_main/adb.exe"
+  host: "127.0.0.1"
+  # 自动探测端口顺序：MuMu12=16384, MuMu6=7555, 雷电=5555/5554, 夜神=62001, 蓝叠=5555
+  ports: [16384, 7555, 5555, 62001, 21503]
+  connect_timeout: 10
+
+screen:
+  # true = 运行时用 `adb shell wm size` 自动读分辨率
+  auto_resolution: true
+  # auto_resolution 失败时回退到这个默认值
+  default_width: 1280
+  default_height: 720
+
+game:
+  package: "com.hypergryph.arknights"   # 官方服；B服改 com.hypergryph.arknights.bilibili
+  activity: ""                          # 留空用 monkey 启动
+  startup_timeout: 60                   # 冷启动最多等几秒
+  recruit_time_hours: 9                 # 固定 9 小时（星级区间最高档）
+  use_expedite: true                    # 用加急许可立即完成
+  # 加急许可耗尽后: stop(停止并通知) | natural(挂 9h 自然招募后继续下一轮)
+  # 无人值守：加急用完自动转自然招募（挂 9h 等），而不是停
+  on_expedite_exhausted: "natural"
+  natural_wait_min: 540            # 自然招募模式下每轮等多久（9 小时）
+  max_slots: 4                          # 一轮处理几个公招位
+  # batch    = 1~4 位先全挂上 9h，再逐个加急领（面板默认，省 OCR、省面板切换）
+  # standard = 一槽到底（挂上→立刻加急→领完）
+  flow_mode: "batch"
+  loop: true                            # 持续循环（false 或 --once 只跑一轮）
+  loop_interval_min: 5                  # 每轮之间等几分钟（等加急/公招位恢复）
+  max_cycles: 0                         # 最多几轮，0=不限
+
+decision:
+  # basic = 保底优先（高级资深/资深 单独选，其余不选词条）—— 刷票最优
+  # lock  = 锁定特定干员（想收藏某个 4★/5★ 时再开）
+  mode: "basic"
+  # 无特殊词条时:
+  #   none     = 一个词条都不选（数学最优：选普通词条只会降星）
+  #   best_tag = 仍要选一个，挑"不会把星级上限压到 4★ 以下"的词条
+  fallback: "none"
+  # lock 模式时锁定的最高星级，0=自动（9h 无特殊词条实际上限 4）
+  lock_max_rarity: 0
+
+ocr:
+  engine: "rapidocr"
+  min_confidence: 0.5
+  # 词条白名单匹配阈值 (0~1)，OCR 文本与 31 个词条的相似度下限
+  match_threshold: 0.7
+
+stats:
+  record: true                 # 追加写 logs/history.jsonl
+  # 星级 → 票据折算权重（绿票/黄票口径按你自己服务器改，脚本只做加法）
+  ticket_weights: {1: 0, 2: 0, 3: 1, 4: 1, 5: 1, 6: 1}
+
+notify:
+  enabled: true
+  # 仅当出货达到该星级才推送（1-3★ 太频繁，只记日志）
+  notify_min_rarity: 4
+  smtp_host: "smtp.qq.com"
+  smtp_port: 465
+  smtp_ssl: true
+  smtp_user: "your_qq_number@qq.com"   # 填你自己的 QQ 邮箱
+  # QQ邮箱 SMTP 授权码（不是登录密码！QQ邮箱网页版→设置→账户→开启SMTP→生成授权码）
+  smtp_password: ""
+  to: ["your_qq_number@qq.com"]
+
+data:
+  # 词条数据来源（MAA 官方拆包，随版本更新）
+  source_url: "https://cdn.jsdelivr.net/gh/MaaAssistantArknights/MaaAssistantArknights@master/resource/recruitment.json"
+  cache_path: "data/recruitment.json"
+  # 每次启动是否拉最新数据（false=用本地缓存，更稳）
+  update_on_start: false
+
+dry_run:
+  seed: 20260101        # 离线模拟的随机种子（同种子=可复现）
+
+# UI 坐标（相对屏幕的比例 0~1；calibrate.py 采集后填这里）
+# 主流程 OCR 驱动（按文字找按钮），坐标只用于「点开公招位」「时间 +/-」这类无文字位置
+ui:
+  # 下面这套坐标是 2026-11-02 对着 1600x900（公招页 2x2 四格）实测标定的
+  slots:          # 4 个公招位（按屏幕比例，运行时乘实际分辨率）
+    - {x: 0.2525, y: 0.480}   # 左上
+    - {x: 0.7460, y: 0.480}   # 右上
+    - {x: 0.2525, y: 0.864}   # 左下
+    - {x: 0.7460, y: 0.864}   # 右下
+  # 主界面公招入口图标（文字是英文 RECRUITMENT 时 OCR 也能命中，这里是坐标兜底）
+  entry_recruit: {x: 0.789, y: 0.706}   # 大厅「公开招募」图标（2026-11-03 实测 1262,635）
+  # 词条面板只有一个蓝色 ✓ / 黑色 ✗，没有文字按钮
+  confirm_btn: {x: 0.753, y: 0.808}
+  cancel_btn:  {x: 0.753, y: 0.902}
+  # 进行中的槽位：「立即招募」按钮 + 加急确认弹窗的 ✓（弹窗无文字）
+  expedite_btn:     {x: 0.325, y: 0.529}
+  expedite_confirm: {x: 0.754, y: 0.704}
+  # 出货流程：聘用候选人 → 结果页 SKIP → 全屏立绘点空白关闭
+  claim_btn:        {x: 0.254, y: 0.529}
+  skip_btn:         {x: 0.956, y: 0.073}
+  # 出货卡「干员名牌」区域（整屏 OCR 漏字时放大这块再认，2026-11-03 实测按 1600x900 标）
+  result_name:      {x1: 0.30, y1: 0.70, x2: 0.78, y2: 0.93}
+  result_close:     {x: 0.125, y: 0.889}
+  # ===== 极速路径（1600x900 标定；每槽目标 <6s）=====
+  # 原理：固定位置裁小块，只跑「识别」不跑「检测」，单次 ~60ms（全屏 OCR 要 4~6s）
+  fast:
+    time:      {x1: 0.29, y1: 0.27, x2: 0.68, y2: 0.36}   # 面板上的 09:00:00
+    header:    {x1: 0.10, y1: 0.28, x2: 0.60, y2: 0.40}   # 面板抬头（判 进行中/已找到）
+    list_head: {x1: 0.02, y1: 0.14, x2: 0.26, y2: 0.23}   # 列表页左上「招募说明」
+    # 「招募时限」这个标签只在词条面板上有 → 用它区分「面板」和「列表页」最稳
+    label:     {x1: 0.17, y1: 0.28, x2: 0.29, y2: 0.34}
+    name:      {x1: 0.30, y1: 0.70, x2: 0.70, y2: 0.79}   # 出货卡中文名条带
+    tag_grid:                                              # 词条 2×3 网格（分钟级标定）
+      rows: [[0.500, 0.569], [0.600, 0.669]]
+      cols: [[0.284, 0.414], [0.415, 0.545], [0.545, 0.675]]
+    # 四个格子各自的「立即招募 / 聘用候选人」坐标（卡片内固定，不用 OCR 找）
+    cards:
+      - {expedite: {x: 0.325, y: 0.529}, claim: {x: 0.254, y: 0.529}}
+      - {expedite: {x: 0.818, y: 0.529}, claim: {x: 0.746, y: 0.529}}
+      - {expedite: {x: 0.325, y: 0.914}, claim: {x: 0.254, y: 0.914}}
+      - {expedite: {x: 0.808, y: 0.914}, claim: {x: 0.746, y: 0.914}}
+  tag_tap_delay: 0.06
+  # 招募时长：时/分/秒三段各有一对上下箭头，这里用的是「时」的上/下箭头
+  time_plus:  {x: 0.350, y: 0.200}
+  time_minus: {x: 0.350, y: 0.411}
+  time_step_min: 60        # 点一次「时」上箭头 = +1 小时（01:00:00 → 09:00:00 点 8 次）
+  time_taps_max: 70        # 最多点几次 +（安全上限）
+  action_delay: 1.2        # 关键操作后的等待（秒）
+  fast_delay: 0.25         # 点击弹窗/词条后的短等待
+  tap_time_delay: 0.12     # 连点 + 的间隔
+  retry: 3                 # 单步重试次数

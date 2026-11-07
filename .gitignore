@@ -1,0 +1,29 @@
+# --- 日志：只保留出货历史，忽略截图 / logcat / 构建日志（体积大） ---
+logs/*
+!logs/history.jsonl
+!logs/history_sim.jsonl
+
+# --- 打包产物（可从源码重建） ---
+build/
+dist/
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# --- 编辑器 / 系统 ---
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# --- 压缩包 / 迁移包 ---
+*.zip
+*.7z
+*.tar.gz
+*.rar
