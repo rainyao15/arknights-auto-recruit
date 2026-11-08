@@ -296,3 +296,22 @@ def test_select_tags_reports_failure_when_never_highlights():
     ui._tag_hits = {}
     assert ui.select_tags_fast(["削弱"]) is False
     assert len(adb.taps) == 2, adb.taps
+
+
+# ---------------- 11) 分辨率：极速路径的开关规则 ----------------
+def test_fast_ready_resolution_rules():
+    """1600x900 直接放行；其它分辨率默认走慢速；16:9 可显式开启。"""
+    ui, _ = _ui()
+    ui.width, ui.height = 1600, 900
+    assert ui.fast_ready() is True
+
+    ui.width, ui.height = 1920, 1080
+    assert ui.fast_ready() is False                 # 默认不启用
+
+    ui.cfg["ui"]["fast"]["allow_any_16_9"] = True
+    assert ui.fast_ready() is True                  # 显式开启后放行
+
+    ui.width, ui.height = 1920, 1200                # 16:10 → 布局比例变了，仍走慢速
+    assert ui.fast_ready() is False
+
+    ui.cfg["ui"]["fast"].pop("allow_any_16_9", None)

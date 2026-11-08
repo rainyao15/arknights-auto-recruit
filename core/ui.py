@@ -868,9 +868,17 @@ class UI:
             return False
         at = f.get("at") or [1600, 900]
         try:
-            return (self.width, self.height) == (int(at[0]), int(at[1]))
+            if (self.width, self.height) == (int(at[0]), int(at[1])):
+                return True
         except Exception:
-            return self.width == 1600 and self.height == 900
+            if self.width == 1600 and self.height == 900:
+                return True
+        # 可选：同 16:9 的其它分辨率（1920x1080 / 1280x720 / 2560x1440…）也允许走极速路径。
+        # 坐标全是比例，16:9 下等比缩放后仍然对得上；但个别客户端会加黑边/改布局，
+        # 所以默认关闭，要在 config.ui.fast.allow_any_16_9 里显式打开并自己验证一轮。
+        if f.get("allow_any_16_9"):
+            return abs(self.width / max(1, self.height) - 16 / 9) <= 0.02
+        return False
 
     def _frame(self):
         """取当前帧：有缓存就用缓存（截图 0.66s，能省一次是一次）。"""
