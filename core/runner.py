@@ -18,6 +18,7 @@ import traceback
 
 from . import paths
 from .adb_client import AdbClient, AdbError
+from .device import create_backend
 from .data_loader import DataLoader
 from .decision import decide, explain_risky_tags
 from .logger import get_logger
@@ -45,6 +46,8 @@ class Runner:
         self.device = ""
         self.cycle = 0
         self.no_expedite = False     # 加急许可用完 → 转自然招募
+        # 每一格之间的待机：0 = 不歇，靠「看一屏 → 再做下一步」的状态轮询推进
+        self.slot_gap = float((cfg.get("game") or {}).get("slot_gap_sec", 0.4))
         self.current = ""            # 人类可读的当前动作
 
     # ------------------------------------------------------------------ 基础
@@ -102,7 +105,7 @@ class Runner:
         pkg = self.cfg["game"].get("package", "com.hypergryph.arknights")
         self.log.warning("硬重置：force-stop %s 后重新启动", pkg)
         try:
-            self.ui.adb._sh("am", "force-stop", pkg)
+            self.ui.adb.kill_app(pkg)
         except Exception as e:
             self.log.warning("force-stop 失败: %s", e)
         self._wait(3)
@@ -159,7 +162,7 @@ class Runner:
                                  time_step_min=self.cfg["ui"].get("time_step_min", 60))
             adb, ocr = FakeAdb(self.sim), FakeOcr(self.sim)
         else:
-            adb, ocr = AdbClient(self.cfg), OcrEngine(self.cfg)
+            adb, ocr = create_backend(self.cfg), OcrEngine(self.cfg)
 
         self.device = adb.connect()
         self.data = DataLoader(self.cfg).load()
@@ -174,6 +177,17 @@ class Runner:
         self.notifier = Notifier(self.cfg)
 
         self.log.info("设备就绪: %s（%dx%d）", self.device, self.ui.width, self.ui.height)
+        if not self.dry_run:
+            try:
+                self.ui.ensure_list_fast(attempts=2)
+                self.ui.card_map = self.ui.locate_cards()      # 按实际像素定位卡片/按钮
+                locked = self.ui.detect_locked_slots()
+                if locked:
+                    self.ui.locked_slots |= locked
+                    self.log.warning("检测到 %s 号位未解锁（人力办公室等级不够）→ 本次运行跳过",
+                                     "、".join(str(i) for i in sorted(locked)))
+            except Exception as e:
+                log.debug("未解锁槽位预检失败(%s)，改由点击反馈判定", e)
         if not self.data.operators:
             self.log.warning("干员数据为空，决策只用词条规则")
         self.log.info(self.stats.total_summary())
@@ -212,6 +226,15 @@ class Runner:
                 time.sleep(0.45)
                 ui._last_img = None
                 state, cur = ui.panel_state_fast()
+                if state == "other" and ui.screen_kind() == "list":
+                    # 补点还是没开 → 这一格大概率没解锁（人力办公室等级不够）。
+                    # 以前会掉进慢速全屏 OCR 再折腾 5~10s，每轮都白烧一遍；
+                    # 现在记住它，之后整局都不再碰。
+                    if slot not in ui.locked_slots:
+                        ui.locked_slots.add(slot)
+                        self.log.warning(
+                            "第 %d 位点了没反应（没解锁？人力办公室等级不够）→ 之后跳过这一格", slot)
+                    return {}
             if state == "placing":
                 budget = ui.budget_left()
                 if budget == 0:
@@ -221,9 +244,13 @@ class Runner:
                     self.stop_event.set()
                     return {}
                 tags = ui.read_tags_fast()
-                if len(tags) < 2:                    # 网格没标准 → 退回慢速读词条
-                    log.debug("极速词条只读到 %s，退回慢速", tags)
-                    tags = ui.read_tags()
+                # 词条面板固定 5 条。少一条就可能漏掉「高级资深/资深/削弱」这种
+                # 决定星级的词条（2026-11-08 实机：削弱没被选上，就是网格漏读）。
+                if len(tags) < 4:
+                    self.log.info("极速词条只读到 %d 条（应 5 条）→ 整屏 OCR 补一遍", len(tags))
+                    slow = ui.read_tags()
+                    tags = list(dict.fromkeys(tags + slow))
+                self.log.info("词条(%d): %s", len(tags), "、".join(tags) or "无")
                 if not tags:
                     log.warning("第 %d 位没读到词条 → 跳过", slot)
                     ui.cancel_panel()
@@ -235,7 +262,10 @@ class Runner:
                                        fallback=fallback)
                 self.log.info("决策: %s —— %s",
                               "+".join(combo) if combo else "（不选词条）", reason)
-                ui.select_tags_fast(combo)
+                if not ui.select_tags_fast(combo):
+                    # 点偏了/被面板吞掉时不能再默默继续 —— 否则日志说选了，游戏里没选
+                    self.log.error("第 %d 位词条可能没选上（决策=%s），本轮仍然继续",
+                                   slot, "+".join(combo))
                 ui.set_time_fast(hours)
                 if not ui.confirm_fast(verify=False):
                     ui.kill_popups_fast(rounds=2)
@@ -342,6 +372,16 @@ class Runner:
                 except Exception:
                     pass
                 return {}
+            if status == "stopped":
+                # 弹出了「停止招募将放弃已投入的资源」确认框 —— 已经点了取消。
+                # 绝对不能重试这格（重试就可能真的把招募停掉），本轮跳过。
+                self.log.error("第 %d 位遇到「停止招募」确认框 → 已点取消，本轮跳过", slot)
+                ui.save_shot(f"slot{slot}_stop_dialog")
+                try:
+                    ui.dismiss_dialog()
+                except Exception:
+                    pass
+                return {}
             if status == "no_expedite":
                 self.no_expedite = True
                 self.log.warning("加急许可用完 → 后面改自然招募（每轮等 9h）")
@@ -435,6 +475,14 @@ class Runner:
 
         done = 0
         fail_streak = 0
+        # 没解锁的格子（人力办公室等级不够）整局都不碰，免得分轮重复空点
+        locked = getattr(ui, "locked_slots", set())
+        if locked:
+            active = [s for s in slots if s not in locked]
+            if not active:
+                self.log.warning("勾选的槽位全都没解锁（%s）→ 本轮跳过", sorted(locked))
+                return 0
+            slots = active
         if flow_mode == "batch":
             # 1) 先把所有空位挂满；正在招募的位记下来，等会儿一起领
             placed, claim_order = {}, []
@@ -459,7 +507,7 @@ class Runner:
                         self.notifier.notify("公招异常停止", f"连续 {fail_streak} 格挂单失败")
                         self.stop_event.set()
                         break
-                self._wait(0.4)
+                self._wait(self.slot_gap)
 
             if len(claim_order) < len(slots):
                 self.log.info("本轮挂上 %d/%d 位（其余空位/异常已跳过）",
@@ -484,7 +532,7 @@ class Runner:
                                              self.stats.session_summary())
                         self.stop_event.set()
                         break
-                self._wait(0.4)
+                self._wait(self.slot_gap)
         else:
             for slot in slots:
                 if self.stopped:
@@ -498,7 +546,7 @@ class Runner:
                     ui.save_shot(f"c{self.cycle}_slot{slot}_err")
                     if "加急许可耗尽" in str(e):
                         break
-                self._wait(0.4)
+                self._wait(self.slot_gap)
         return done
 
     # ------------------------------------------------------------------ 主循环
@@ -506,7 +554,11 @@ class Runner:
             interval_min: float = None):
         """阻塞跑，直到 stop() 或跑满 cycles 轮。"""
         self.stop_event.clear()
-        slots = slots or list(range(1, int(self.cfg["game"].get("max_slots", 4)) + 1))
+        if slots is None:
+            slots = list(range(1, int(self.cfg["game"].get("max_slots", 4)) + 1))
+        if not slots:
+            self.log.error("一个公招位都没勾选 → 不启动（以前会静默改成 1~4 号位，容易误点锁住的格子）")
+            return self.stats.session
         if interval_min is None:
             interval_min = float(self.cfg["game"].get("loop_interval_min", 5))
 
@@ -529,6 +581,7 @@ class Runner:
             self.recover_ui("进公招页失败")
 
         self.cycle = 0
+        zero_streak = 0                    # 连续「0 产出」轮数（无间隔模式下防死循环）
         while not self.stopped:
             self.cycle += 1
             t_cycle = time.time()
@@ -577,6 +630,23 @@ class Runner:
                     "natural_wait_min", 540)))
                 self.log.info("自然招募模式：本轮等 %d 分钟（9h）后再收", int(wait_min))
             if wait_min <= 0:
+                # 无间隔模式：一秒都不等，直接开下一轮。
+                # 唯一例外是「连续几轮都捞不到东西」——那说明真没活儿可干
+                # （没空位 / 没许可 / 被弹窗挡住），死循环重试只会疯狂截图抢焦点，
+                # 所以这里收工并通知，而不是空转。
+                if n == 0:
+                    zero_streak += 1
+                    if zero_streak >= int(self.cfg["game"].get("idle_stop_cycles", 3)):
+                        self.log.warning("连续 %d 轮没有可公招的位子/许可 → 收工", zero_streak)
+                        self.notifier.notify(
+                            "公招：没活儿了",
+                            "\n".join([
+                                f"连续 {zero_streak} 轮 0 产出（无空位/无许可/界面异常），已停止。",
+                                self.stats.session_summary(),
+                            ]))
+                        break
+                else:
+                    zero_streak = 0
                 continue
             self.log.info("等待 %d 分钟后进入下一轮（点「停止」可随时打断）",
                           int(wait_min))

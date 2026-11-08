@@ -11,7 +11,8 @@ import tkinter as tk
 import cv2
 from PIL import Image, ImageTk
 
-from core.adb_client import AdbClient, AdbError
+from core.device import create_backend
+from core.adb_client import AdbError
 from core.config import load_config
 
 POINTS = [
@@ -24,10 +25,10 @@ POINTS = [
 
 def main():
     cfg = load_config("config.yaml")
-    adb = AdbClient(cfg)
+    adb = create_backend(cfg)
     try:
         adb.connect()
-    except AdbError as e:
+    except Exception as e:
         print(f"连接失败: {e}")
         sys.exit(1)
 

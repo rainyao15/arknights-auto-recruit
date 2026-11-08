@@ -5,3 +5,7 @@ opencv-python-headless>=4.8.0  # 截图解码/图像处理（rapidocr 会自带�
 numpy>=1.24.0
 PyYAML>=6.0
 requests>=2.31.0
+
+# ---- PC 端后端（backend: pc）----
+mss>=9.0.1              # 屏幕抓取（PC 端抓屏 7~15ms，比 PrintWindow 稳）
+pywin32>=306 ; sys_platform == "win32"   # 可选：部分环境抢焦点更稳

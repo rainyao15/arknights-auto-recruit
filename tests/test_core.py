@@ -187,9 +187,140 @@ def test_stats_record_and_summary(tmp=None):
     assert st2.totals.get(4) == 1
 
 
+# ---------------- 出货页「快进」推进：安全闸 ----------------
+def test_advance_result_never_taps_on_list():
+    """开干员包页的兜底是「点屏幕中央」，所以列表/面板/大厅必须一下都不点。
+
+    2026-11-03 的教训：在列表页点中央正好选中某个公招格，后面几格全乱。
+    """
+    from core.simulator import FakeAdb, FakeOcr, SimScreen
+    from core.ui import UI
+
+    sim = SimScreen(seed=1)
+    adb = FakeAdb(sim)
+    ui = UI(adb, FakeOcr(sim), _CFG, _DATA)
+    ui.dry_run = False                      # 强制走真实分支（模拟器对象没有像素）
+
+    for kind in ("list", "panel", "lobby", "base"):
+        ui.screen_kind = lambda k=kind: k
+        n = len(adb.taps)
+        assert ui.advance_result() == "none", kind
+        assert len(adb.taps) == n, f"{kind} 上不该点，却点了"
+
+    ui.screen_kind = lambda: "other"
+    ui._last_img = None
+    n = len(adb.taps)
+    assert ui.advance_result() == "center"
+    assert len(adb.taps) == n + 1, "非列表页应该点一次快进"
+    x, y = adb.taps[-1]
+    assert (round(x / ui.width, 2), round(y / ui.height, 2)) == (0.5, 0.5)
+
+
+def test_card_button_uses_real_center_plus_offset():
+    """按钮位置 = 实际卡片中心 + 配置里的相对偏移（PC 布局和模拟器不同也必须点得准）。"""
+    from core.simulator import FakeAdb, FakeOcr, SimScreen
+    from core.ui import UI
+
+    sim = SimScreen(seed=11)
+    adb = FakeAdb(sim)
+    ui = UI(adb, FakeOcr(sim), _CFG, _DATA)
+    ui.card_map = {3: {"center": (444.0, 732.0), "button": None}}
+
+    slot = _CFG["ui"]["slots"][2]          # 第 3 格
+    exp = _CFG["ui"]["fast"]["cards"][2]["expedite"]
+    ox = (exp["x"] - slot["x"]) * ui.width
+    oy = (exp["y"] - slot["y"]) * ui.height
+
+    bx, by = ui.card_button(3)
+    assert abs(bx - (444 + ox)) < 1.0, (bx, 444 + ox)
+    assert abs(by - (732 + oy)) < 1.0, (by, 732 + oy)
+
+    # OCR 直接读到按钮文字时，用它给的精确位置
+    ui.card_map[3]["button"] = (700.0, 800.0)
+    assert ui.card_button(3) == (700.0, 800.0)
+
+    # 没定位到卡片 → 回退到配置比例
+    ui.card_map = {}
+    assert ui.card_button(3) == (exp["x"] * ui.width, exp["y"] * ui.height)
+
+
+def test_result_close_taps_capped_at_one():
+    """关卡（点左下空白）整个领取只允许 1 下，之后必须返回 False。"""
+    from core.simulator import FakeAdb, FakeOcr, SimScreen
+    from core.ui import UI
+
+    sim = SimScreen(seed=3)
+    adb = FakeAdb(sim)
+    ui = UI(adb, FakeOcr(sim), _CFG, _DATA)
+    ui.dry_run = False
+    ui.cfg["ui"]["result_close_taps"] = 1
+
+    n = len(adb.taps)
+    assert ui.tap_result_close() is True
+    assert len(adb.taps) == n + 1
+    assert ui.tap_result_close() is False, "第二下必须被挡住"
+    assert len(adb.taps) == n + 1, "第二下不该真的点出去"
+
+    ui._close_taps = 0                       # 新一次领取 → 重新计数
+    assert ui.tap_result_close() is True
+
+
+def test_skip_result_pages_no_blind_retap():
+    """点了没反应时只许点一下，不许在列表上空点好几下。"""
+    from core.simulator import FakeAdb, FakeOcr, SimScreen
+    from core.ui import UI
+
+    sim = SimScreen(seed=7)
+    adb = FakeAdb(sim)
+    ui = UI(adb, FakeOcr(sim), _CFG, _DATA)
+    ui.dry_run = False
+    ui.screen_kind = lambda: "other"          # 永远认不出界面
+    ui.on_result_card = lambda: False
+    ui._frame = lambda: None
+    ui._wait_change = lambda *a, **k: False   # 模拟「点了界面纹丝不动」
+
+    n = len(adb.taps)
+    assert ui.skip_result_pages(max_taps=4) is False
+    assert len(adb.taps) == n + 1, f"应该只点 1 下，实际点了 {len(adb.taps) - n} 下"
+
+    ui._wait_change = lambda *a, **k: True    # 界面有反应 → 允许继续推
+    ui.cfg["ui"]["result_pages"] = {"max_taps": 3, "timeout": 3.5}
+    n = len(adb.taps)
+    ui.skip_result_pages(max_taps=3)
+    assert len(adb.taps) == n + 3, f"有反应时应点满 3 下，实际 {len(adb.taps) - n}"
+
+
 if __name__ == "__main__":
     fns = [f for k, f in sorted(globals().items()) if k.startswith("test_") and callable(f)]
     for fn in fns:
         fn()
         print(f"PASS {fn.__name__}")
     print(f"\n全部 {len(fns)} 个测试通过")
+
+
+# ---------------- 词条识别：两字词条容错（2026-11-08 新增） ----------------
+def test_match_tag_tolerates_one_char_typo_on_short_tags():
+    """两字词条 OCR 错一个字相似度只有 0.5，旧逻辑直接丢弃 → 削弱/输出 会漏。"""
+    assert match_tag("削弱") == "削弱"
+    assert match_tag("削羽") == "削弱"          # 相似度 0.50 + 唯一最优
+    assert match_tag("输岀") == "输出"
+    assert match_tag("群玫") == "群攻"
+    assert match_tag("快速复话") == "快速复活"   # 三字以上本来就够 0.75
+
+
+def test_match_tag_rejects_ambiguous_short_noise():
+    """等距歧义（输出/生存 都是 0.5）不许瞎猜。"""
+    assert match_tag("生出") is None
+    assert match_tag("一") is None
+
+
+def test_recruit_data_integrity():
+    """公招数据体检：词条白名单齐全、星级合法、资深池只含对应星级。"""
+    assert len(_DATA.tags) >= 31
+    for op in OPS:
+        assert 1 <= op["rarity"] <= 6, op
+        assert op["tags"], op
+    six = {op["rarity"] for op in OPS if "高级资深干员" in op["tags"]}
+    five = {op["rarity"] for op in OPS if "资深干员" in op["tags"]}
+    assert six == {6}, six
+    assert five == {5}, five

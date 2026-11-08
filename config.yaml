@@ -2,10 +2,38 @@
 # 明日方舟 自动公招脚本 配置
 # ============================================================
 
+# 跑在哪：auto = 检测到游戏窗口就用 PC 端，否则走 ADB
+#   adb = 强制模拟器/手机；pc = 强制官方 PC 客户端
+backend: "auto"
+
+# ---- 官方 PC 客户端（backend=pc 时生效）----
+pc:
+  # 游戏主程序。找不到就留空，用 launcher_path 起启动器
+  exe_path: "C:/Program Files/Arknights/Arknights.exe"
+  launcher_path: ""            # 例: "C:/Program Files/Arknights/launcher.exe"
+  process_name: "Arknights.exe"
+  # 窗口识别：标题关键词 或 窗口类名 UnityWndClass（报错时用 pc_probe.py --list 看真名）
+  window_title_kw: ["明日方舟", "Arknights"]
+  window_class: "UnityWndClass"
+  # 抓屏：auto(优先 mss/dxcam, 否则 PrintWindow) | mss | dxcam | printwindow | gdi | screen
+  capture: "auto"
+  # 输入：sendinput(前台真实鼠标,最兼容) | postmessage(后台不抢鼠标,部分 Unity 收不到)
+  input: "sendinput"
+  focus_required: true         # 点之前把窗口提到前台
+  click_hold_ms: 16            # 按下-抬起间隔，Unity 按钮太小要 >10ms
+  restore_cursor: true         # 跑完后把鼠标放回原处（连点过程中不动）
+  # 抓屏前把游戏顶到最前：mss 抓的是「屏幕上最前面」的东西，
+  # 面板/微信/终端盖在游戏上就会拍到它们（实测会出现「认不出出货卡、原地狂点」）
+  focus_before_capture: true
+  startup_timeout: 180         # 冷启动等窗口上限（PC 端加载比模拟器快，但首次解包慢）
+  # 游戏是管理员启动时，非管理员进程抢焦点/还原窗口/定位光标都会被拒（实测）
+  # true = 直接报错让你提权；false = 只警告（调试用）
+  require_admin: true
+
 adb:
-  # adb 可执行文件路径；留空则自动找 PATH → 模拟器自带 adb
+  # adb 可执行文件路径；留空则自动探测（PATH → 常见模拟器目录）。
   # 例: "C:/Program Files/Netease/MuMu Player 12/shell/adb.exe"
-  adb_path: "D:/Program Files/Netease/MuMu/nx_main/adb.exe"
+  adb_path: ""
   host: "127.0.0.1"
   # 自动探测端口顺序：MuMu12=16384, MuMu6=7555, 雷电=5555/5554, 夜神=62001, 蓝叠=5555
   ports: [16384, 7555, 5555, 62001, 21503]
@@ -15,8 +43,10 @@ screen:
   # true = 运行时用 `adb shell wm size` 自动读分辨率
   auto_resolution: true
   # auto_resolution 失败时回退到这个默认值
-  default_width: 1280
-  default_height: 720
+  # PC 端强烈建议把游戏窗口设成 1600x900（无边框/窗口化都行）：
+  # ui.fast 那套极速裁块就是按 1600x900 标的，直接复用、不用重标
+  default_width: 1600
+  default_height: 900
 
 game:
   package: "com.hypergryph.arknights"   # 官方服；B服改 com.hypergryph.arknights.bilibili
@@ -33,7 +63,14 @@ game:
   # standard = 一槽到底（挂上→立刻加急→领完）
   flow_mode: "batch"
   loop: true                            # 持续循环（false 或 --once 只跑一轮）
-  loop_interval_min: 5                  # 每轮之间等几分钟（等加急/公招位恢复）
+  # 每轮之间等几分钟。0 = 跑完立刻下一轮（靠 state 轮询，不靠瞎等）
+  loop_interval_min: 0
+  # 每格之间的待机秒数：0 = 不等（要点是下面那些 delay 也都 0）
+  slot_gap_sec: 0
+  # 空转等待：0 = 一秒都不等（连跑下一轮）
+  idle_wait_sec: 0
+  # 无间隔模式下，连续几轮 0 产出就判定「真没活儿了」并收工（不是等待，是停止）
+  idle_stop_cycles: 3
   max_cycles: 0                         # 最多几轮，0=不限
 
 decision:
@@ -90,7 +127,11 @@ ui:
     - {x: 0.2525, y: 0.864}   # 左下
     - {x: 0.7460, y: 0.864}   # 右下
   # 主界面公招入口图标（文字是英文 RECRUITMENT 时 OCR 也能命中，这里是坐标兜底）
-  entry_recruit: {x: 0.789, y: 0.706}   # 大厅「公开招募」图标（2026-11-03 实测 1262,635）
+  # 大厅「公开招募」图标。
+  # 模拟器(1600x900)实测 1262,635 = (0.789, 0.706)
+  # PC 端(1600x900)实测文字中心 1277,642 = (0.798, 0.714) —— 两者差 15px 就能点歪到
+  # 旁边的「寻访历史记录」，所以 PC 端请用这一组：
+  entry_recruit: {x: 0.798, y: 0.714}
   # 词条面板只有一个蓝色 ✓ / 黑色 ✗，没有文字按钮
   confirm_btn: {x: 0.753, y: 0.808}
   cancel_btn:  {x: 0.753, y: 0.902}
@@ -101,17 +142,25 @@ ui:
   claim_btn:        {x: 0.254, y: 0.529}
   skip_btn:         {x: 0.956, y: 0.073}
   # 出货卡「干员名牌」区域（整屏 OCR 漏字时放大这块再认，2026-11-03 实测按 1600x900 标）
-  result_name:      {x1: 0.30, y1: 0.70, x2: 0.78, y2: 0.93}
+  # 出货卡名牌区。2026-11-08 实测 PC 端：大字名在 y 0.62~0.88（旧带 0.70~0.93
+  # 把字顶裁掉了，det-OCR 只能读到「近」「个普通的雇」这种碎片）
+  result_name:      {x1: 0.28, y1: 0.62, x2: 0.80, y2: 0.88}
   result_close:     {x: 0.125, y: 0.889}
   # ===== 极速路径（1600x900 标定；每槽目标 <6s）=====
   # 原理：固定位置裁小块，只跑「识别」不跑「检测」，单次 ~60ms（全屏 OCR 要 4~6s）
   fast:
+    # 极速裁块的标定分辨率。PC 端客户区不是 1600x900 时，重标后把这里改成实际值
+    at: [1600, 900]
     time:      {x1: 0.29, y1: 0.27, x2: 0.68, y2: 0.36}   # 面板上的 09:00:00
     header:    {x1: 0.10, y1: 0.28, x2: 0.60, y2: 0.40}   # 面板抬头（判 进行中/已找到）
-    list_head: {x1: 0.02, y1: 0.14, x2: 0.26, y2: 0.23}   # 列表页左上「招募说明」
+    # 列表页左上标题「公开招募」。2026-11-08 实测：y1/y2 取 0.14/0.23 时裁掉了
+    # 文字下半截，四帧全读成「公开招莫」→ screen_kind 判 other → 列表页上狂点中央。
+    list_head: {x1: 0.02, y1: 0.16, x2: 0.26, y2: 0.25}
     # 「招募时限」这个标签只在词条面板上有 → 用它区分「面板」和「列表页」最稳
     label:     {x1: 0.17, y1: 0.28, x2: 0.29, y2: 0.34}
     name:      {x1: 0.30, y1: 0.70, x2: 0.70, y2: 0.79}   # 出货卡中文名条带
+    # 词条面板区域（带检测 OCR 用，比 2×3 网格中心可靠；网格只当兜底）
+    tag_area: {x1: 0.26, y1: 0.47, x2: 0.72, y2: 0.70}
     tag_grid:                                              # 词条 2×3 网格（分钟级标定）
       rows: [[0.500, 0.569], [0.600, 0.669]]
       cols: [[0.284, 0.414], [0.415, 0.545], [0.545, 0.675]]
@@ -121,13 +170,34 @@ ui:
       - {expedite: {x: 0.818, y: 0.529}, claim: {x: 0.746, y: 0.529}}
       - {expedite: {x: 0.325, y: 0.914}, claim: {x: 0.254, y: 0.914}}
       - {expedite: {x: 0.808, y: 0.914}, claim: {x: 0.746, y: 0.914}}
-  tag_tap_delay: 0.06
+  # ===== 出货流程：黑箱动画 / 开干员包 那一屏 =====
+  # 实机（2026-11-07）：加急券用掉后会出现一屏「开干员包」，整屏没有 SKIP 文字，
+  # 旧逻辑认不出状态 → 干等 9s 判失败，白丢一格出货。
+  # 这一屏点屏幕任意处就能快进，所以按「右上 SKIP → 文字按钮 → 点 result_nudge」三级推进。
+  result_nudge: {x: 0.500, y: 0.500}     # 快进兜底点（屏幕中央）
+  result_kw: ["点击继续", "点击屏幕", "继续", "快进", "跳过"]   # 出现这些文字就点它
+  # 出货卡之后可能跟一屏「干员介绍」（新干员才有），点一下就快进：
+  #   max_taps 最多点几下 / timeout 最多花几秒（回到列表立刻收手，绝不多点）
+  result_pages: {max_taps: 4, timeout: 3.5}
+  # 出货卡「关卡」（点左下空白）整个领取流程只点几次。1 = 只点 1 下，之后只点中央快进
+  result_close_taps: 1
+  # 领取时「认不出界面」最多推几下（从 14 收到 4）：推多了会把出货卡点穿，白丢一次出货
+  claim_nudges: 4
+  # 点词条后的停手时间：0 会让「选词条 → 连点 8 下时长 → ✓」挤在 200ms 内，
+  # 面板常常吞掉前面那一下（实测 2026-11-08：决策选了「召唤」，游戏里没选上）
+  tag_tap_delay: 0.12
   # 招募时长：时/分/秒三段各有一对上下箭头，这里用的是「时」的上/下箭头
   time_plus:  {x: 0.350, y: 0.200}
   time_minus: {x: 0.350, y: 0.411}
   time_step_min: 60        # 点一次「时」上箭头 = +1 小时（01:00:00 → 09:00:00 点 8 次）
   time_taps_max: 70        # 最多点几次 +（安全上限）
-  action_delay: 1.2        # 关键操作后的等待（秒）
-  fast_delay: 0.25         # 点击弹窗/词条后的短等待
-  tap_time_delay: 0.12     # 连点 + 的间隔
+  # ---- 等待全部归零：进度靠「看一屏 → 决定下一步」的状态轮询，不靠固定 sleep ----
+  # 如果哪天发现「点了没反应」（多半是游戏卡/掉帧），把 fast_delay 调回 0.05~0.1 即可
+  action_delay: 0          # 关键操作后的等待（秒）
+  fast_delay: 0            # 点击弹窗/词条后的短等待
+  tap_time_delay: 0        # 连点 + 的间隔
+  poll_delay: 0.2          # 状态轮询间隔（看一眼→决定下一步），0.2s 已比人眼快
+  # 点完之后等界面「真的变化」的最长时间（帧差 > 1.5 就算变）。
+  # 没变化 = 这一下是空点 → 立刻收手，不再补刀（回大厅后空点好几下就是这么来的）
+  ui_settle: 0.9
   retry: 3                 # 单步重试次数

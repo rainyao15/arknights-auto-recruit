@@ -2,6 +2,7 @@
 logs/*
 !logs/history.jsonl
 !logs/history_sim.jsonl
+!logs/.gitkeep
 
 # --- 打包产物（可从源码重建） ---
 build/
@@ -27,3 +28,18 @@ Thumbs.db
 *.7z
 *.tar.gz
 *.rar
+
+# --- 构建中转目录（打包中间产物）---
+build_new/
+dist_new/
+
+# --- 数据备份（import_maa 自动生成）---
+data/backup/
+
+# --- 打包/调试临时文件与旧版 exe ---
+*.pyz.tmp
+*_old_*.exe
+.pytest_cache/
+
+# --- 本机快捷方式（含绝对路径，不进仓库）---
+*.lnk

@@ -49,6 +49,22 @@ def test_batch_places_all_then_claims():
     assert r.sim.state == "list", r.sim.state
 
 
+def test_locked_slots_are_skipped():
+    """没解锁的槽位（人力办公室等级不够）整局都不该再点。
+
+    实机现象：点了 3/4 号位没反应 → 以前每轮都要重走一遍慢速 OCR，
+    用户看到的就是「招募完一个后一直对着空气点三四下，过一会才招第二个」。
+    """
+    events = []
+    r = _runner(on_state=lambda st: events.append(st))
+    r.ui.locked_slots = {3, 4}
+    r.cycle = 1
+    done = r.run_cycle([1, 2, 3, 4], flow_mode="batch")
+    placed = {e["slot"] for e in events if e.get("phase") == "place"}
+    assert placed <= {1, 2}, f"锁住的格子不该再点: {placed}"
+    assert done == 2, f"只该领到 2 位，实际 {done}"
+
+
 def test_batch_reads_every_operator():
     """一轮 4 位，出货干员名必须全读到（不能出现空名字）。"""
     r = _runner()

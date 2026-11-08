@@ -20,16 +20,31 @@ def similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+# 两字词条是识别最脆弱的一类：OCR 错一个字，相似度就掉到 0.5，
+# 直接低于 0.7 阈值被丢掉（实测：'削羽'→None、'输岀'→None、'群玫'→None、
+# '近站位'→0.67→None）。丢一条就可能把「削弱」这种 4★ 保底词条漏掉。
+SHORT_TAG = 2
+
+
 def match_tag(text: str, tags=None, threshold: float = 0.7) -> str | None:
-    """把一段 OCR 文本匹配到最接近的词条；低于阈值返回 None。"""
+    """把一段 OCR 文本匹配到最接近的词条；低于阈值返回 None。
+
+    两字词条额外给一条「唯一最优」容错：
+      * 相似度只要求 ≥0.45，
+      * 但必须比第二名高出 ≥0.20（避免「输出/生存」这种等距歧义瞎猜）。
+    三字以上词条保持原阈值（它们错一个字仍有 0.75，不需要放宽）。
+    """
     tags = tags or TAGS_31
-    best_tag, best_score = None, 0.0
-    for t in tags:
-        s = similarity(text, t)
-        if s > best_score:
-            best_tag, best_score = t, s
-    if best_tag and best_score >= threshold:
+    scored = sorted(((similarity(text, t), t) for t in tags), reverse=True)
+    if not scored:
+        return None
+    best_score, best_tag = scored[0]
+    if best_score >= threshold:
         return best_tag
+    if len(_norm(best_tag)) == SHORT_TAG:
+        second = scored[1][0] if len(scored) > 1 else 0.0
+        if best_score >= 0.45 and (best_score - second) >= 0.20:
+            return best_tag
     return None
 
 

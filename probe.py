@@ -18,7 +18,7 @@ try:
 except Exception:
     pass
 
-from core.adb_client import AdbClient
+from core.device import create_backend
 from core.config import load_config
 from core.ocr import OcrEngine
 
@@ -49,7 +49,7 @@ def main():
     a = ap.parse_args()
 
     cfg = load_config(a.config)
-    adb = AdbClient(cfg)
+    adb = create_backend(cfg)
     print("设备:", adb.connect(), "| 焦点:", adb.current_package())
     ocr = OcrEngine(cfg)
 

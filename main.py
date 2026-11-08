@@ -35,6 +35,7 @@ def main():
     args = ap.parse_args()
 
     paths.ensure_dirs()
+    paths.ensure_user_files()
     cfg = load_config(paths.resolve_config(args.config))
     log = setup_logger(paths.LOG_DIR)
 

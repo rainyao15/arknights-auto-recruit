@@ -324,3 +324,10 @@ class AdbClient:
     def app_running(self, package: str) -> bool:
         r = self._sh("pidof", package)
         return bool(r.stdout.strip())
+
+    def kill_app(self, package: str) -> None:
+        """对应 PC 后端的 kill_app：强杀游戏进程（供 runner.hard_reset_game 复用）。"""
+        try:
+            self._sh("am", "force-stop", package)
+        except AdbError as e:
+            log.warning("force-stop %s 失败: %s", package, e)
